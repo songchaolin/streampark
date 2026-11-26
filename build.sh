@@ -166,48 +166,96 @@ build() {
   scalaArg=$1
   modeArg=$2
 
-  if [ ! -x "$PRG_DIR/mvnw" ]; then
-    # shellcheck disable=SC2006
-    echo_r "permission denied: $PRG_DIR/mvnw, please check."
-    exit 1
+  scala="scala-2.12"
+  if [ $scalaArg == 1 ]; then
+    scala="scala-2.11"
+  fi
+
+  profile="-P${scala},shaded,dist"
+  if [ $modeArg == 1 ]; then
+    profile="${profile},webapp"
+    echo_g "build info: package mode @ mixed, $scala, now build starting..."
   else
-    scala="scala-2.12"
-    if [ $scalaArg == 1 ]; then
-      scala="scala-2.11"
-    fi
+    echo_g "build info: package mode @ detached, $scala, now build starting..."
+  fi
 
-    profile="-P${scala},shaded,dist"
+  echo_g "--1--"
+  mvn $profile -DskipTests -Drat.skip=true -Dstyle.color=always -e clean install 2>&1 | tee build_$(date +%Y%m%d_%H%M%S).log
+  echo_g "--2--"
+
+  if [ ${PIPESTATUS[0]} -eq 0 ]; then
     if [ $modeArg == 1 ]; then
-      profile="${profile},webapp"
-      echo_g "build info: package mode @ mixed, $scala, now build starting..."
+      printf '\n'
+      echo_g """StreamPark project build successful!
+      info: package mode @ mixed, $scala
+      dist: $(cd "$PRG_DIR" &>/dev/null && pwd)/dist\n"""
     else
-      echo_g "build info: package mode @ detached, $scala, now build starting..."
+      printf '\n'
+      echo_g """StreamPark project build successful!
+      info: package mode @ detached, $scala
+      dist: $(cd "$PRG_DIR" &>/dev/null && pwd)/dist
+
+      Next, you need to build front-end by yourself.
+
+       1) cd $(cd "$PRG_DIR" &>/dev/null && pwd)/streampark-console/streampark-console-webapp
+       2) pnpm install && pnpm build
+
+      please visit: https://streampark.apache.org/docs/user-guide/deployment for more detail. \n"""
     fi
-
-    "$PRG_DIR"/mvnw $profile -DskipTests clean install
-
-    if [ $? -eq 0 ]; then
-      if [ $modeArg == 1 ]; then
-        printf '\n'
-        echo_g """StreamPark project build successful!
-        info: package mode @ mixed, $scala
-        dist: $(cd "$PRG_DIR" &>/dev/null && pwd)/dist\n"""
-      else
-        printf '\n'
-        echo_g """StreamPark project build successful!
-        info: package mode @ detached, $scala
-        dist: $(cd "$PRG_DIR" &>/dev/null && pwd)/dist
-
-        Next, you need to build front-end by yourself.
-
-         1) cd $(cd "$PRG_DIR" &>/dev/null && pwd)/streampark-console/streampark-console-webapp
-         2) pnpm install && pnpm build
-
-        please visit: https://streampark.apache.org/docs/user-guide/deployment for more detail. \n"""
-      fi
-    fi
+  else
+    echo_r "StreamPark project build FAILED! check build_*.log for details."
   fi
 }
+
+
+#build() {
+#  scalaArg=$1
+#  modeArg=$2
+#
+#  if [ ! -x "$PRG_DIR/mvnw" ]; then
+#    # shellcheck disable=SC2006
+#    echo_r "permission denied: $PRG_DIR/mvnw, please check."
+#    exit 1
+#  else
+#    scala="scala-2.12"
+#    if [ $scalaArg == 1 ]; then
+#      scala="scala-2.11"
+#    fi
+#
+#    profile="-P${scala},shaded,dist"
+#    if [ $modeArg == 1 ]; then
+#      profile="${profile},webapp"
+#      echo_g "build info: package mode @ mixed, $scala, now build starting..."
+#    else
+#      echo_g "build info: package mode @ detached, $scala, now build starting..."
+#    fi
+#    echo_g "--1--"
+##    "$PRG_DIR" mvn $profile -DskipTests -Drat.skip=true clean install
+#    mvn $profile -DskipTests -Drat.skip=true -Dstyle.color=always -e clean install 2>&1 | tee build_$(date +%Y%m%d_%H%M%S).log
+##    "$PRG_DIR" mvn $profile -DskipTests -Drat.skip=true -Dstyle.color=always -Dorg.slf4j.simpleLogger.defaultLogLevel=info -e clean install 2>&1 | tee build_$(date +%Y%m%d_%H%M%S).log
+#    echo_g "--2--"
+#    if [ $? -eq 0 ]; then
+#      if [ $modeArg == 1 ]; then
+#        printf '\n'
+#        echo_g """StreamPark project build successful!
+#        info: package mode @ mixed, $scala
+#        dist: $(cd "$PRG_DIR" &>/dev/null && pwd)/dist\n"""
+#      else
+#        printf '\n'
+#        echo_g """StreamPark project build successful!
+#        info: package mode @ detached, $scala
+#        dist: $(cd "$PRG_DIR" &>/dev/null && pwd)/dist
+#
+#        Next, you need to build front-end by yourself.
+#
+#         1) cd $(cd "$PRG_DIR" &>/dev/null && pwd)/streampark-console/streampark-console-webapp
+#         2) pnpm install && pnpm build
+#
+#        please visit: https://streampark.apache.org/docs/user-guide/deployment for more detail. \n"""
+#      fi
+#    fi
+#  fi
+#}
 
 main() {
   print_logo

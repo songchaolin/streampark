@@ -121,6 +121,27 @@ object YarnUtils extends Logger {
   }
 
   /**
+   * Resolve the base URL for ResourceManager REST API access. Unlike [[getRMWebAppURL]], this
+   * always targets the RM web app address (yarn.resourcemanager.webapp.address) instead of
+   * preferring yarn.web-proxy.address. That is because the web proxy only serves /proxy/... paths
+   * and does NOT expose the RM-only REST endpoints such as ws/v1/cluster/apps/...
+   */
+  def getRMWebAppRestURL(getLatest: Boolean = false): String = {
+    val conf = HadoopUtils.hadoopConf
+    val (webConfKey, defaultPort, protocol) = {
+      if (YarnConfiguration.useHttps(conf)) {
+        (
+          YarnConfiguration.RM_WEBAPP_HTTPS_ADDRESS,
+          YarnConfiguration.DEFAULT_RM_WEBAPP_HTTPS_PORT,
+          "https://")
+      } else {
+        (YarnConfiguration.RM_WEBAPP_ADDRESS, YarnConfiguration.DEFAULT_RM_WEBAPP_PORT, "http://")
+      }
+    }
+    protocol + conf.get(webConfKey, s"$defaultPort")
+  }
+
+  /**
    * <pre>
    *
    * @return
@@ -237,10 +258,19 @@ object YarnUtils extends Logger {
             }
         }
       case _ =>
-        Try(request(s"${getRMWebAppURL()}/$url", timeout)) match {
+        val baseURL = {
+          if (url.startsWith("ws/v1")) getRMWebAppRestURL()
+          else getRMWebAppURL()
+        }
+        Try(request(s"$baseURL/$url", timeout)) match {
           case Success(v) => v
           case Failure(_) =>
-            Utils.retry[String](5)(request(s"${getRMWebAppURL(true)}/$url", timeout)) match {
+            Utils.retry[String](5) {
+              val retryURL =
+                if (url.startsWith("ws/v1")) getRMWebAppRestURL(getLatest = true)
+                else getRMWebAppURL(getLatest = true)
+              request(s"$retryURL/$url", timeout)
+            } match {
               case Success(v) => v
               case Failure(e) =>
                 throw new ConnectException(

@@ -221,12 +221,18 @@ public class FlinkAppHttpWatcher {
               cleanupLost(application);
             } catch (Exception flinkException) {
               log.warn("[StreamPark] get state from flink failed ", flinkException);
+              log.info(
+                  "[DEBUG] flink rest failed, before yarn: appId={} jobManagerUrl={} clusterId={} stopFrom={}",
+                  application.getId(),
+                  application.getJobManagerUrl(),
+                  application.getClusterId(),
+                  getStopFrom(application));
               // query status from yarn rest api
               try {
                 getFromYarnRestApi(application);
                 cleanupLost(application);
               } catch (Exception yarnException) {
-                log.error("[StreamPark] get state from yarn failed :", flinkException);
+                log.error("[StreamPark] get state from yarn failed :", yarnException);
                 doStateFailed(application);
               }
             }
@@ -245,6 +251,14 @@ public class FlinkAppHttpWatcher {
     */
     StopFrom stopFrom = getStopFrom(application);
     OptionState optionState = OPTIONING.get(application.getId());
+    Date lostCacheVal = LOST_CACHE.getIfPresent(application.getId());
+    log.info(
+        "[DEBUG] doStateFailed enter: appId={} stopFrom={} optionState={} currentState={} lostCacheSet={}",
+        application.getId(),
+        stopFrom,
+        optionState,
+        FlinkAppState.of(application.getState()),
+        lostCacheVal != null);
     if (optionState == null || !optionState.equals(OptionState.STARTING)) {
       // non-mapping
       if (application.getState() != FlinkAppState.MAPPING.getValue()) {
@@ -274,6 +288,11 @@ public class FlinkAppHttpWatcher {
       cleanOptioning(optionState, application.getId());
       doPersistMetrics(application, true);
       FlinkAppState appState = application.getFlinkAppStateEnum();
+      log.info(
+          "[DEBUG] doStateFailed final: appId={} finalState={} willAlert={}",
+          application.getId(),
+          appState,
+          appState.equals(FlinkAppState.FAILED) || appState.equals(FlinkAppState.LOST));
       if (appState.equals(FlinkAppState.FAILED) || appState.equals(FlinkAppState.LOST)) {
         alertService.alert(application, application.getFlinkAppStateEnum());
         if (appState.equals(FlinkAppState.FAILED)) {
@@ -550,8 +569,24 @@ public class FlinkAppHttpWatcher {
         if (yarnAppInfo != null) {
           String state = yarnAppInfo.getApp().getFinalStatus();
           flinkAppState = FlinkAppState.of(state);
+          log.info(
+              "[DEBUG] canceling-cache branch: appId={} yarnFinalStatus={} mappedTo={}",
+              application.getId(),
+              state,
+              flinkAppState);
+        } else {
+          log.info(
+              "[DEBUG] canceling-cache branch: appId={} yarnAppInfo=null", application.getId());
         }
       } finally {
+        log.info(
+            "[DEBUG] canceling-cache branch result: appId={} stopFrom={} finalSet={} willAlert={}",
+            application.getId(),
+            stopFrom,
+            flinkAppState,
+            StopFrom.NONE.equals(stopFrom)
+                && (flinkAppState == FlinkAppState.KILLED
+                    || flinkAppState == FlinkAppState.FAILED));
         if (StopFrom.NONE.equals(stopFrom)) {
           log.error(
               "[StreamPark][FlinkAppHttpWatcher] query previous state was canceling and stopFrom NotFound,savepoint expired!");
@@ -600,6 +635,12 @@ public class FlinkAppHttpWatcher {
           if (FlinkAppState.SUCCEEDED.equals(flinkAppState)) {
             flinkAppState = FlinkAppState.FINISHED;
           }
+          log.info(
+              "[DEBUG] yarn else branch: appId={} yarnFinalStatus={} finalSet={} stopFrom={}",
+              application.getId(),
+              state,
+              flinkAppState,
+              stopFrom);
           application.setState(flinkAppState.getValue());
           cleanOptioning(optionState, application.getId());
           doPersistMetrics(application, true);
@@ -607,6 +648,10 @@ public class FlinkAppHttpWatcher {
               || flinkAppState.equals(FlinkAppState.LOST)
               || (flinkAppState.equals(FlinkAppState.CANCELED) && StopFrom.NONE.equals(stopFrom))
               || applicationService.checkAlter(application)) {
+            log.info(
+                "[DEBUG] yarn else branch ALERT fired: appId={} state={}",
+                application.getId(),
+                flinkAppState);
             alertService.alert(application, flinkAppState);
             stopCanceledJob(application.getId());
             if (flinkAppState.equals(FlinkAppState.FAILED)) {
@@ -714,7 +759,19 @@ public class FlinkAppHttpWatcher {
 
   private YarnAppInfo httpYarnAppInfo(Application application) throws Exception {
     String reqURL = "ws/v1/cluster/apps/".concat(application.getClusterId());
-    return yarnRestRequest(reqURL, YarnAppInfo.class);
+    YarnAppInfo yarnAppInfo = yarnRestRequest(reqURL, YarnAppInfo.class);
+    log.info(
+        "[DEBUG] yarn appInfo query result: clusterId={} reqURL={} appNull={} finalStatus={} state={}",
+        application.getClusterId(),
+        reqURL,
+        yarnAppInfo == null || yarnAppInfo.getApp() == null,
+        yarnAppInfo == null || yarnAppInfo.getApp() == null
+            ? "NULL"
+            : yarnAppInfo.getApp().getFinalStatus(),
+        yarnAppInfo == null || yarnAppInfo.getApp() == null
+            ? "NULL"
+            : yarnAppInfo.getApp().getState());
+    return yarnAppInfo;
   }
 
   private Overview httpOverview(Application application) throws IOException {
